@@ -6,6 +6,8 @@ import re
 import nltk
 from nltk.tokenize import sent_tokenize
 import time
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Set page configuration
 st.set_page_config(
@@ -80,7 +82,7 @@ def domain_tuned_summarize(article_text, classifier, num_sentences=3):
     
     # Handle short articles
     if len(valid_sentences) <= num_sentences:
-        return valid_sentences, list(range(len(valid_sentences)))
+        return valid_sentences, list(range(len(valid_sentences))), None, None
     
     # Extract features
     features = []
@@ -92,10 +94,16 @@ def domain_tuned_summarize(article_text, classifier, num_sentences=3):
     try:
         # Predict importance
         importance_scores = classifier.predict_proba(features_df)[:, 1]  # Probability of class 1
+        
+        # Get feature importances for explainability
+        feature_importances = None
+        if hasattr(classifier, 'feature_importances_'):
+            feature_importances = dict(zip(features_df.columns, classifier.feature_importances_))
     except Exception as e:
         st.warning(f"Error in prediction: {e}. Using fallback method.")
         # Simple fallback based on position
         importance_scores = [(len(valid_sentences) - i) / len(valid_sentences) for i in range(len(valid_sentences))]
+        feature_importances = None
     
     # Rank sentences
     ranked_sentences = sorted(
@@ -116,13 +124,98 @@ def domain_tuned_summarize(article_text, classifier, num_sentences=3):
     
     summary = [valid_sentences[i] for i in selected_indices]
     
-    return summary, original_indices
+    # Create explainability data - features for each selected sentence
+    sentence_explanations = []
+    for idx in selected_indices:
+        feature_dict = features_df.iloc[idx].to_dict()
+        sentence_explanations.append({
+            'sentence': valid_sentences[idx],
+            'features': feature_dict,
+            'importance_score': importance_scores[idx]
+        })
+    
+    return summary, original_indices, sentence_explanations, feature_importances
+
+# Function to create explainability visualization
+def create_feature_importance_chart(feature_importances):
+    if not feature_importances:
+        return None
+    
+    # Convert to dataframe and sort
+    importance_df = pd.DataFrame({
+        'Feature': list(feature_importances.keys()),
+        'Importance': list(feature_importances.values())
+    }).sort_values('Importance', ascending=False)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(x='Importance', y='Feature', data=importance_df, ax=ax)
+    ax.set_title('Feature Importance for Sentence Selection')
+    ax.set_xlabel('Relative Importance')
+    ax.set_ylabel('Feature')
+    
+    return fig
+
+# Function to display feature values for a sentence with explanation
+def display_sentence_features(sentence_data, feature_importances):
+    st.subheader(f"Why this sentence was selected:")
+    
+    # Display the sentence
+    st.markdown(f"**\"{sentence_data['sentence']}\"**")
+    st.write(f"Overall importance score: {sentence_data['importance_score']:.2f}")
+    
+    # Sort features by importance
+    if feature_importances:
+        sorted_features = sorted(
+            sentence_data['features'].items(), 
+            key=lambda x: feature_importances.get(x[0], 0), 
+            reverse=True
+        )
+    else:
+        sorted_features = sorted(
+            sentence_data['features'].items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )
+    
+    # Create a more user-friendly display
+    feature_display = {
+        'position': "Position in the document",
+        'position_norm': "Normalized position (0 = start, 1 = end)",
+        'length': "Number of words",
+        'length_norm': "Normalized length (capped at 30 words)",
+        'contains_number': "Contains numbers",
+        'starts_with_quote': "Starts with a quote",
+        'contains_named_entity': "Contains named entities (capitalized words)",
+        'first_sentence': "Is the first sentence",
+        'second_sentence': "Is the second sentence",
+        'early_paragraph': "Appears in early paragraphs",
+        'important_word_count': "Number of important words",
+        'starts_with_pronoun': "Starts with a pronoun"
+    }
+    
+    # Display top features with explanations
+    for feature_name, value in sorted_features:
+        importance = feature_importances.get(feature_name, 0) if feature_importances else 0
+        display_name = feature_display.get(feature_name, feature_name)
+        
+        # For binary features, convert to Yes/No
+        if value in [0, 1] and feature_name not in ['position', 'important_word_count', 'length']:
+            display_value = "Yes" if value == 1 else "No"
+        else:
+            display_value = f"{value:.2f}" if isinstance(value, float) else value
+        
+        if importance > 0.01:  # Only show somewhat important features
+            st.write(f"**{display_name}**: {display_value} *(Importance: {importance:.3f})*")
+        else:
+            st.write(f"**{display_name}**: {display_value}")
     
 # Main app
 def main():
-    st.title("📝 Text Summarizer")
+    st.title("📝 Text Summarizer with Explainability")
     st.markdown("""
-    This app uses machine learning and extractive NLP techniques to summarize news articles. Rather than generating new text, it identifies the most important sentences from the original article. To get started, simply paste a news article below and adjust the number of sentences you want in your summary. 
+    This app uses a domain-specific machine learning model to summarize text and explains why certain sentences were selected.
+    Simply paste your text below and adjust the number of sentences you want in your summary.
     """)
     
     # Load the models
@@ -145,6 +238,7 @@ def main():
     
     show_stats = st.sidebar.checkbox("Show sentence statistics", value=False)
     highlight_sentences = st.sidebar.checkbox("Highlight selected sentences in original text", value=True)
+    show_explanation = st.sidebar.checkbox("Show why sentences were selected", value=True)
     
     # Sample article for demonstration
     if st.sidebar.button("Load Sample Article"):
@@ -180,7 +274,7 @@ def main():
             
             # Get the summary
             try:
-                summary_sentences, selected_indices = domain_tuned_summarize(
+                summary_sentences, selected_indices, sentence_explanations, feature_importances = domain_tuned_summarize(
                     article_text, domain_model, num_sentences=num_sentences
                 )
             except Exception as e:
@@ -207,6 +301,23 @@ def main():
                 col1.metric("Original word count", original_word_count)
                 col2.metric("Summary word count", summary_word_count)
                 col3.metric("Compression ratio", f"{summary_word_count/original_word_count:.1%}")
+            
+            # Show explainability information
+            if show_explanation and feature_importances:
+                st.subheader("How the Model Works")
+                st.write("This summarizer uses a machine learning model to identify important sentences. Here's what the model considers important:")
+                
+                # Display feature importance chart
+                importance_chart = create_feature_importance_chart(feature_importances)
+                if importance_chart:
+                    st.pyplot(importance_chart)
+                
+                # Show detailed explanation for each selected sentence
+                st.subheader("Why These Sentences Were Selected")
+                if sentence_explanations:
+                    for i, sent_data in enumerate(sentence_explanations):
+                        with st.expander(f"Sentence {i+1}"):
+                            display_sentence_features(sent_data, feature_importances)
             
             # Show original text with highlighted sentences
             if highlight_sentences:
