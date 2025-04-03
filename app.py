@@ -117,41 +117,12 @@ def domain_tuned_summarize(article_text, classifier, num_sentences=3):
     summary = [valid_sentences[i] for i in selected_indices]
     
     return summary, original_indices
-
-# Function to summarize text using BERT
-def bert_summarize_wrapper(article_text, num_sentences=3):
-    """Wrapper for BERT summarization that uses a simple extractive approach"""
-    try:
-        # Simple extractive summarization as fallback
-        sentences = sent_tokenize(article_text)
-        
-        # Filter out very short sentences
-        valid_sentences = []
-        valid_indices = []
-        for i, s in enumerate(sentences):
-            if isinstance(s, str) and len(s.strip()) > 5:
-                valid_sentences.append(s)
-                valid_indices.append(i)
-        
-        # Simply take the first few sentences as a basic summary
-        # This is a very simple approach but works as a placeholder
-        summary_indices = valid_indices[:min(num_sentences, len(valid_indices))]
-        summary = [valid_sentences[i-valid_indices[0]] for i in summary_indices]
-        
-        return summary, summary_indices
-        
-    except Exception as e:
-        st.error(f"Error in BERT fallback summarization: {e}")
-        # Ultimate fallback
-        sentences = sent_tokenize(article_text)
-        return sentences[:min(num_sentences, len(sentences))], list(range(min(num_sentences, len(sentences))))
     
 # Main app
 def main():
     st.title("📝 Text Summarizer")
     st.markdown("""
-    This app uses machine learning models to summarize text. It uses an extractive method, meaning it will identify key sentences from the original text to form the summary, rather than generating new text. It is domain-tuned for news articles, and optimized for speed.
-    Simply paste a news article below and adjust the number of sentences you want in your summary.
+    This app uses machine learning and extractive NLP techniques to summarize news articles. Rather than generating new text, it identifies the most important sentences from the original article. To get started, simply paste a news article below and adjust the number of sentences you want in your summary. 
     """)
     
     # Load the models
@@ -163,11 +134,6 @@ def main():
     
     # Sidebar options
     st.sidebar.title("Summarization Options")
-    
-    model_type = st.sidebar.radio(
-        "Choose summarization model:",
-        ["Domain-tuned", "BERT"]
-    )
     
     num_sentences = st.sidebar.slider(
         "Number of sentences in summary:",
@@ -212,16 +178,11 @@ def main():
             # Track summarization time
             start_time = time.time()
             
-            # Get the summary based on selected model
+            # Get the summary
             try:
-                if model_type == "Domain-tuned":
-                    summary_sentences, selected_indices = domain_tuned_summarize(
-                        article_text, domain_model, num_sentences=num_sentences
-                    )
-                else:  # BERT
-                    summary_sentences, selected_indices = bert_summarize_wrapper(
-                        article_text, num_sentences=num_sentences
-                    )
+                summary_sentences, selected_indices = domain_tuned_summarize(
+                    article_text, domain_model, num_sentences=num_sentences
+                )
             except Exception as e:
                 st.error(f"Error generating summary: {e}")
                 st.stop()
@@ -230,7 +191,7 @@ def main():
             time_taken = time.time() - start_time
             
             # Display stats
-            st.success(f"Summary generated in {time_taken:.2f} seconds using {model_type} model!")
+            st.success(f"Summary generated in {time_taken:.2f} seconds!")
             
             # Display the summary
             st.subheader("Summary")
