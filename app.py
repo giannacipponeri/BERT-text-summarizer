@@ -120,10 +120,9 @@ def domain_tuned_summarize(article_text, classifier, num_sentences=3):
     
 # Main app
 def main():
-    st.title("Text Summarizer")
+    st.title("News Article Summarizer")
     st.markdown("""
-    This app uses a domain-specific machine learning model to summarize text. 
-    Simply paste your text below and adjust the number of sentences you want in your summary.
+     This app uses extractive NLP techniques to summarize news articles by identifying the most important sentences from the original text. Simply paste a news article below and adjust the number of sentences you want in your summary. 
     """)
     
     # Load the models
